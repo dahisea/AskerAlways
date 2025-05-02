@@ -28,7 +28,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install httpx uvloop
+        pip install requests
     
     - name: Build
       run: |
