@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 
 
 MAX_THREADS = 2000                                    # 最大线程数
-STATS_INTERVAL = 600                                # 统计间隔(秒)
+STATS_INTERVAL = 600                                # 统计间隔(秒) 10分钟=600秒
+MAX_RUNTIME = 4 * 3600                             # 最大运行时间(秒) 4小时=14400秒
 CHUNK_SIZE = 8192                                  # 每次读取块大小
 
 class TrafficGenerator:
@@ -23,7 +24,6 @@ class TrafficGenerator:
         self.start_time = datetime.now()
         self.last_stats_time = self.start_time
         self.lock = threading.Lock()
-        self.queue = Queue()
         
         # 初始化工作线程
         self.workers = []
@@ -48,10 +48,12 @@ class TrafficGenerator:
         elapsed = (now - self.start_time).total_seconds()
         
         if force or (now - self.last_stats_time).total_seconds() >= STATS_INTERVAL:
+            remaining_time = max(0, MAX_RUNTIME - elapsed)
             download_speed = self.total_bytes / max(elapsed, 1)
             
-            print("\n=== 流量统计 ===")
+            print("\n=== 统计 ===")
             print(f"运行时间: {timedelta(seconds=int(elapsed))}")
+            print(f"剩余时间: {timedelta(seconds=int(remaining_time))}")
             print(f"总流量: {self.format_bytes(self.total_bytes)}")
             print(f"平均速度: {self.format_bytes(download_speed)}/s")
             print(f"当前线程数: {self.current_threads}")
@@ -77,7 +79,7 @@ class TrafficGenerator:
                     # 错误较多时自动减少线程数
                     if self.error_count % 5 == 0 and self.current_threads > 1:
                         self.current_threads -= 1
-                        print(f"网络不稳定，减少至 {self.current_threads} 线程")
+                        print(f"[警告] 网络不稳定，减少至 {self.current_threads} 线程")
     
     def adjust_threads(self):
         """动态调整线程数"""
@@ -86,28 +88,49 @@ class TrafficGenerator:
             with self.lock:
                 if self.error_count < 3 and self.current_threads < self.max_threads:
                     self.current_threads += 1
-                    print(f"网络状况良好，增加至 {self.current_threads} 线程")
+                    print(f"[优化] 网络状况良好，增加至 {self.current_threads} 线程")
+    
+    def runtime_monitor(self):
+        """运行时间监控"""
+        while not self.stop_flag:
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            if elapsed >= MAX_RUNTIME:
+                self.stop_flag = True
+                print(f"\n[完成] 已达到最大运行时间 {timedelta(seconds=MAX_RUNTIME)}")
+                break
+            time.sleep(1)
     
     def run(self):
-        print(f"=== 启动 ===")
+        print(f"=== 流量生成器启动 ===")
         print(f"目标URL: {self.url}")
         print(f"最大线程数: {self.max_threads}")
         print(f"统计间隔: {STATS_INTERVAL//60}分钟")
-        print("按 Ctrl+C 停止运行\n")
+        print(f"最大运行时间: {timedelta(seconds=MAX_RUNTIME)}")
+        print("按 Ctrl+C 可提前停止运行\n")
         
         # 启动线程调整器
         adjust_thread = threading.Thread(target=self.adjust_threads, daemon=True)
         adjust_thread.start()
         
+        # 启动运行时间监控
+        monitor_thread = threading.Thread(target=self.runtime_monitor, daemon=True)
+        monitor_thread.start()
+        
         try:
             while not self.stop_flag:
                 self.show_stats()
-                time.sleep(10)  # 每10秒检查一次是否需要显示统计
+                time.sleep(10)  # 每10秒检查一次
         except KeyboardInterrupt:
             self.stop_flag = True
+            print("\n[中断] 用户请求停止")
+        finally:
+            # 等待监控线程结束
+            monitor_thread.join()
             adjust_thread.join()
+            
+            # 显示最终统计
             self.show_stats(force=True)
-            print("\n流量生成器已停止")
+            print("测试流生成器已停止")
 
 if __name__ == "__main__":
     generator = TrafficGenerator()
