@@ -1,24 +1,30 @@
+import threading
 import time
 import random
 import socket
 import struct
 import requests
 from datetime import datetime, timedelta
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from undetected_chromedriver.v2 import ChromeDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 
 
 
 
-
-MAX_THREADS = 2000
-STATS_INTERVAL = 600
-MAX_RUNTIME = 4 * 3600
+MAX_THREADS = 10
+STATS_INTERVAL = 30
+MAX_RUNTIME = 60
 CHUNK_SIZE = 8192
+HEADER_FIELDS = [
+    'User-Agent', 'Accept', 'Accept-Language', 'Accept-Encoding',
+    'Connection', 'DNT', 'Upgrade-Insecure-Requests', 'X-Real-IP',
+    'X-Forwarded-For', 'Remote-Addr', 'X-Request-ID', 'X-Client-Version',
+    'Pragma', 'Cache-Control'
+]
+
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
@@ -34,187 +40,107 @@ def generate_random_ip():
 def generate_random_ua():
     template = random.choice(USER_AGENTS)
     if "Chrome" in template:
-        return template.format(
-            random.randint(90, 99),
-            random.randint(1000, 9999),
-            random.randint(100, 999))
+        return template.format(random.randint(90, 99), random.randint(1000, 9999), random.randint(100, 999))
     elif "Safari" in template and "Mac" in template:
-        return template.format(
-            random.randint(11, 15),
-            random.randint(0, 7),
-            random.randint(12, 15),
-            random.randint(0, 7))
+        return template.format(random.randint(11, 15), random.randint(0, 7), random.randint(12, 15), random.randint(0, 7))
     elif "Firefox" in template:
-        return template.format(
-            random.randint(80, 95),
-            random.randint(80, 95))
+        return template.format(random.randint(80, 95), random.randint(80, 95))
     elif "iPhone" in template:
-        return template.format(
-            random.randint(12, 15),
-            random.randint(0, 7),
-            random.randint(12, 15))
+        return template.format(random.randint(12, 15), random.randint(0, 7), random.randint(12, 15))
     elif "Android" in template:
-        return template.format(
-            random.randint(8, 11),
-            random.randint(90, 99),
-            random.randint(1000, 9999),
-            random.randint(100, 999))
+        return template.format(random.randint(8, 11), random.randint(90, 99), random.randint(1000, 9999), random.randint(100, 999))
 
-class TrafficGenerator:
-    def __init__(self):
-        self.url = TARGET_URL
-        self.max_threads = MAX_THREADS
-        self.current_threads = MAX_THREADS
-        self.stop_flag = False
+def generate_headers():
+    ip = generate_random_ip()
+    headers = {
+        'User-Agent': generate_random_ua(),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'DNT': str(random.randint(0, 1)),
+        'Upgrade-Insecure-Requests': '1',
+        'X-Real-IP': ip,
+        'X-Forwarded-For': ip,
+        'Remote-Addr': ip,
+        'X-Request-ID': ''.join(random.choices('0123456789abcdef', k=32)),
+        'X-Client-Version': f"{random.randint(1, 10)}.{random.randint(0, 9)}",
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache'
+    }
+    return {k: headers[k] for k in HEADER_FIELDS if k in headers}
+
+def interact_with_page(url, headers):
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    for h in headers:
+        options.add_argument(f"--header={h}: {headers[h]}")
+
+    driver = uc.Chrome(options=options)
+    driver.get(url)
+    time.sleep(random.uniform(2, 5))
+    actions = ActionChains(driver)
+    actions.send_keys(Keys.PAGE_DOWN).perform()
+    time.sleep(random.uniform(1, 2))
+
+    content_type = driver.execute_script("return document.contentType")
+    cookies = driver.get_cookies()
+    driver.quit()
+    return content_type, cookies
+
+def download_with_requests(url, cookies, headers):
+    s = requests.Session()
+    for c in cookies:
+        s.cookies.set(c['name'], c['value'])
+    r = s.get(url, headers=headers, stream=True, timeout=30)
+    r.raise_for_status()
+    total = 0
+    for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
+        if not chunk:
+            break
+        total += len(chunk)
+    return total
+
+class TrafficSimulator:
+    def __init__(self, url):
+        self.url = url
         self.total_bytes = 0
-        self.error_count = 0
         self.start_time = datetime.now()
-        self.last_stats_time = self.start_time
         self.lock = threading.Lock()
-        self.workers = []
-        for _ in range(self.max_threads):
-            t = threading.Thread(target=self.worker, daemon=True)
-            t.start()
-            self.workers.append(t)
 
-    def get_random_headers(self):
-        ip = generate_random_ip()
-        return {
-            'User-Agent': generate_random_ua(),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'DNT': str(random.randint(0, 1)),
-            'Upgrade-Insecure-Requests': '1',
-            'X-Real-IP': ip,
-            'X-Forwarded-For': ip,
-            'Remote-Addr': ip,
-            'X-Request-ID': ''.join(random.choices('0123456789abcdef', k=32)),
-            'X-Client-Version': str(random.randint(1, 10)) + '.' + str(random.randint(0, 9)),
-            'Pragma': 'no-cache',
-            'Cache-Control': 'no-cache'
-        }
-
-    def format_bytes(self, size):
-        power = 2**10
-        n = 0
-        units = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
-        while size > power and n < len(units)-1:
-            size /= power
-            n += 1
-        return f"{size:.2f} {units[n]}"
-
-    def show_stats(self, force=False):
-        now = datetime.now()
-        elapsed = (now - self.start_time).total_seconds()
-
-        if force or (now - self.last_stats_time).total_seconds() >= STATS_INTERVAL:
-            remaining_time = max(0, MAX_RUNTIME - elapsed)
-            download_speed = self.total_bytes / max(elapsed, 1)
-
-            print("\n=== 流量统计 ===")
-            print(f"运行时间: {timedelta(seconds=int(elapsed))}")
-            print(f"剩余时间: {timedelta(seconds=int(remaining_time))}")
-            print(f"总流量: {self.format_bytes(self.total_bytes)}")
-            print(f"平均速度: {self.format_bytes(download_speed)}/s")
-            print(f"当前线程数: {self.current_threads}")
-            print(f"错误计数: {self.error_count}")
-            print("===============\n")
-
-            self.last_stats_time = now
-
-    def worker(self):
-        while not self.stop_flag:
+    def simulate(self):
+        while True:
+            headers = generate_headers()
             try:
-                headers = self.get_random_headers()
-                session = requests.Session()
-                session.headers.update(headers)
-
-                # 使用 Selenium 进行页面加载和交互
-                options = Options()
-                options.add_argument('--headless')
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-gpu')
-                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
-                driver.get(self.url)
-
-                # 模拟用户滚动
-                for _ in range(random.randint(1, 5)):
-                    actions = ActionChains(driver)
-                    actions.send_keys(Keys.PAGE_DOWN)
-                    actions.perform()
-                    time.sleep(random.uniform(1, 3))
-
-                # 等待加载并获取页面的响应，处理 cookies 和请求
-                page_source = driver.page_source
-                driver.quit()
-
-                if 'text/html' in page_source:
-                    # 如果是 HTML 内容, 则继续使用 Selenium
-                    continue
+                content_type, cookies = interact_with_page(self.url, headers)
+                if 'html' in content_type:
+                    with self.lock:
+                        print(f"[模拟] HTML页面加载完成: {self.url}")
                 else:
-                    # 否则通过 requests 发送 HTTP 请求
-                    with session.get(self.url, stream=True) as r:
-                        r.raise_for_status()
-                        for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
-                            if self.stop_flag or not chunk:
-                                break
-                            with self.lock:
-                                self.total_bytes += len(chunk)
-
+                    size = download_with_requests(self.url, cookies, headers)
+                    with self.lock:
+                        self.total_bytes += size
+                        print(f"[下载] 非HTML内容: {size} 字节")
             except Exception as e:
-                with self.lock:
-                    self.error_count += 1
-                    if self.error_count % 5 == 0 and self.current_threads > 1:
-                        self.current_threads -= 1
-                        print(f"[警告] 网络不稳定，减少至 {self.current_threads} 线程 | 错误: {str(e)}")
-
-    def adjust_threads(self):
-        while not self.stop_flag:
-            time.sleep(30)
-            with self.lock:
-                if self.error_count < 3 and self.current_threads < self.max_threads:
-                    self.current_threads += 1
-                    print(f"[优化] 网络状况良好，增加至 {self.current_threads} 线程")
-
-    def runtime_monitor(self):
-        while not self.stop_flag:
-            elapsed = (datetime.now() - self.start_time).total_seconds()
-            if elapsed >= MAX_RUNTIME:
-                self.stop_flag = True
-                print(f"\n[完成] 已达到最大运行时间 {timedelta(seconds=MAX_RUNTIME)}")
-                break
-            time.sleep(1)
+                print(f"[错误] {e}")
+            time.sleep(random.uniform(2, 5))
 
     def run(self):
-        print(f"=== 测试启动 ===")
-        print(f"最大线程数: {self.max_threads}")
-        print(f"统计间隔: {STATS_INTERVAL//60}分钟")
-        print(f"最大运行时间: {timedelta(seconds=MAX_RUNTIME)}")
-        print("按 Ctrl+C 可提前停止运行\n")
+        threads = []
+        for _ in range(MAX_THREADS):
+            t = threading.Thread(target=self.simulate)
+            t.start()
+            threads.append(t)
 
-        adjust_thread = threading.Thread(target=self.adjust_threads, daemon=True)
-        adjust_thread.start()
+        while (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
+            time.sleep(STATS_INTERVAL)
+            with self.lock:
+                print(f"[统计] 当前总下载: {self.total_bytes} 字节")
 
-        monitor_thread = threading.Thread(target=self.runtime_monitor, daemon=True)
-        monitor_thread.start()
-
-        try:
-            while not self.stop_flag:
-                self.show_stats()
-                time.sleep(10)
-        except KeyboardInterrupt:
-            self.stop_flag = True
-            print("\n[中断] 用户请求停止")
-        finally:
-            monitor_thread.join()
-            adjust_thread.join()
-
-            self.show_stats(force=True)
-            print("流量生成器已停止")
+        for t in threads:
+            t.join(timeout=1)
 
 if __name__ == "__main__":
-    generator = TrafficGenerator()
-    generator.run()
+    simulator = TrafficSimulator(TARGET_URL)
+    simulator.run()
