@@ -28,7 +28,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install requests
+        pip install requests selenium
     
     - name: Build
       run: |
