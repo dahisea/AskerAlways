@@ -20,10 +20,9 @@ HEADER_FIELDS = [
     'X-Forwarded-For', 'Remote-Addr', 'X-Request-ID', 'X-Client-Version',
     'Pragma', 'Cache-Control'
 ]
-
-MAX_THREADS = 100
-STATS_INTERVAL = 300
-MAX_RUNTIME = 18000
+MAX_THREADS = 10
+STATS_INTERVAL = 30
+MAX_RUNTIME = 60
 CHUNK_SIZE = 8192
 
 USER_AGENTS = [
@@ -39,6 +38,11 @@ USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android {0}; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{1}.0.{2}.{3} Mobile Safari/537.36"
 ]
 
+def generate_random_url(base_url):
+    """在基础URL后添加随机"""
+    random_str = ''.join(random.choices('0123456789', k=35))
+    return f"{base_url}{random_str}"
+
 def generate_random_ip():
     return socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
     
@@ -47,35 +51,33 @@ def generate_random_ua():
     try:
         if "Chrome" in template and "Windows" in template:
             return template.format(
-                random.randint(90, 99),  # Chrome主版本
-                random.randint(1000, 9999),  # 构建号
-                random.randint(100, 999))    # 修订号
+                random.randint(90, 99),
+                random.randint(1000, 9999),
+                random.randint(100, 999))
         elif "Safari" in template and "Mac" in template:
             return template.format(
-                random.randint(11, 15),    # Mac OS X 10_版本
-                random.randint(0, 7),       # Mac OS X 修订号
-                random.randint(12, 15),     # Safari主版本
-                random.randint(0, 7))       # Safari修订号
+                random.randint(11, 15),
+                random.randint(0, 7),
+                random.randint(12, 15),
+                random.randint(0, 7))
         elif "Firefox" in template:
             return template.format(
-                random.randint(80, 95),    # Gecko版本
-                random.randint(80, 95))    # Firefox版本
+                random.randint(80, 95),
+                random.randint(80, 95))
         elif "iPhone" in template:
             return template.format(
-                random.randint(12, 15),     # iOS主版本
-                random.randint(0, 7),       # iOS修订号
-                random.randint(12, 15))     # Safari版本
+                random.randint(12, 15),
+                random.randint(0, 7),
+                random.randint(12, 15))
         elif "Android" in template:
             return template.format(
-                random.randint(8, 11),      # Android版本
-                random.randint(90, 99),     # Chrome主版本
-                random.randint(1000, 9999), # 构建号
-                random.randint(100, 999))   # 修订号
+                random.randint(8, 11),
+                random.randint(90, 99),
+                random.randint(1000, 9999),
+                random.randint(100, 999))
         else:
-            # 默认返回一个简单的Chrome UA
             return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(90, 99)}.0.{random.randint(1000, 9999)}.{random.randint(100, 999)} Safari/537.36"
     except (IndexError, KeyError):
-        # 如果格式化失败，返回一个默认UA
         return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
 def generate_headers():
@@ -105,38 +107,37 @@ def interact_with_page(url, headers):
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     
-    # 添加自定义请求头
     for header, value in headers.items():
         options.add_argument(f'--header={header}: {value}')
 
     driver = Chrome(options=options)
     try:
-        driver.get(url)
-        time.sleep(random.uniform(2, 5))
+        random_url = generate_random_url(url)
+        driver.get(random_url)
         
-        # 模拟页面交互
         actions = ActionChains(driver)
         actions.send_keys(Keys.PAGE_DOWN).perform()
         time.sleep(random.uniform(1, 2))
 
         content_type = driver.execute_script("return document.contentType")
         cookies = driver.get_cookies()
-        return content_type, cookies
+        return content_type, cookies, random_url
     finally:
         driver.quit()
 
 def download_with_requests(url, cookies, headers):
+    random_url = generate_random_url(url)
     s = requests.Session()
     for c in cookies:
         s.cookies.set(c['name'], c['value'])
-    r = s.get(url, headers=headers, stream=True, timeout=30)
+    r = s.get(random_url, headers=headers, stream=True, timeout=3)
     r.raise_for_status()
     total = 0
     for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
         if not chunk:
             break
         total += len(chunk)
-    return total
+    return total, random_url
 
 class TrafficSimulator:
     def __init__(self, url):
@@ -149,22 +150,22 @@ class TrafficSimulator:
         while (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
             headers = generate_headers()
             try:
-                content_type, cookies = interact_with_page(self.url, headers)
+                content_type, cookies, used_url = interact_with_page(self.url, headers)
                 if 'html' in content_type:
                     with self.lock:
-                        print(f"[模拟] HTML页面加载完成: {self.url}")
+                        print(f"[模拟] HTML页面加载完成: {used_url}")
                 else:
-                    size = download_with_requests(self.url, cookies, headers)
+                    size, used_url = download_with_requests(self.url, cookies, headers)
                     with self.lock:
                         self.total_bytes += size
-                        print(f"[下载] 非HTML内容: {size} 字节")
+                        print(f"[下载] 非HTML内容: {size} 字节 | URL: {used_url}")
             except Exception as e:
                 print(f"[错误] {e}")
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(1, 2))
 
     def run(self):
         threads = []
-        for _ in range(min(MAX_THREADS, 5)):  # 限制最大线程数，防止资源耗尽
+        for _ in range(min(MAX_THREADS, 5)):
             t = threading.Thread(target=self.simulate)
             t.start()
             threads.append(t)
@@ -178,9 +179,9 @@ class TrafficSimulator:
             t.join(timeout=1)
 
 if __name__ == "__main__":
-    print("测试")
-    print(f"最大运行时间: {MAX_RUNTIME//3600}小时")
+    print("模拟启动")
+    print(f"最大运行时间: {MAX_RUNTIME//60}分钟")
     
     simulator = TrafficSimulator(TARGET_URL)
     simulator.run()
-    print("流量模拟结束")
+    print("模拟结束")
