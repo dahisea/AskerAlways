@@ -12,7 +12,7 @@ from selenium.webdriver.common.keys import Keys
 
 MAX_THREADS = 10
 STATS_INTERVAL = 600
-MAX_RUNTIME = 4 * 3600
+MAX_RUNTIME = 601
 
 class BrowserTrafficGenerator:
     def __init__(self):
