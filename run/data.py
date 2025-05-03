@@ -5,19 +5,15 @@ import socket
 import struct
 import requests
 from datetime import datetime, timedelta
+from selenium.webdriver import Chrome
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-import undetected_chromedriver as uc
 
 
 
 
-MAX_THREADS = 10
-STATS_INTERVAL = 30
-MAX_RUNTIME = 60
-CHUNK_SIZE = 8192
 HEADER_FIELDS = [
     'User-Agent', 'Accept', 'Accept-Language', 'Accept-Encoding',
     'Connection', 'DNT', 'Upgrade-Insecure-Requests', 'X-Real-IP',
@@ -25,6 +21,10 @@ HEADER_FIELDS = [
     'Pragma', 'Cache-Control'
 ]
 
+MAX_THREADS = 10
+STATS_INTERVAL = 30
+MAX_RUNTIME = 60
+CHUNK_SIZE = 8192
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
@@ -74,20 +74,28 @@ def interact_with_page(url, headers):
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
-    for h in headers:
-        options.add_argument(f"--header={h}: {headers[h]}")
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    # 添加自定义请求头
+    for header, value in headers.items():
+        options.add_argument(f'--header={header}: {value}')
 
-    driver = uc.Chrome(options=options)
-    driver.get(url)
-    time.sleep(random.uniform(2, 5))
-    actions = ActionChains(driver)
-    actions.send_keys(Keys.PAGE_DOWN).perform()
-    time.sleep(random.uniform(1, 2))
+    driver = Chrome(options=options)
+    try:
+        driver.get(url)
+        time.sleep(random.uniform(2, 5))
+        
+        # 模拟页面交互
+        actions = ActionChains(driver)
+        actions.send_keys(Keys.PAGE_DOWN).perform()
+        time.sleep(random.uniform(1, 2))
 
-    content_type = driver.execute_script("return document.contentType")
-    cookies = driver.get_cookies()
-    driver.quit()
-    return content_type, cookies
+        content_type = driver.execute_script("return document.contentType")
+        cookies = driver.get_cookies()
+        return content_type, cookies
+    finally:
+        driver.quit()
 
 def download_with_requests(url, cookies, headers):
     s = requests.Session()
@@ -110,7 +118,7 @@ class TrafficSimulator:
         self.lock = threading.Lock()
 
     def simulate(self):
-        while True:
+        while (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
             headers = generate_headers()
             try:
                 content_type, cookies = interact_with_page(self.url, headers)
@@ -128,7 +136,7 @@ class TrafficSimulator:
 
     def run(self):
         threads = []
-        for _ in range(MAX_THREADS):
+        for _ in range(min(MAX_THREADS, 5)):  # 限制最大线程数，防止资源耗尽
             t = threading.Thread(target=self.simulate)
             t.start()
             threads.append(t)
@@ -136,11 +144,16 @@ class TrafficSimulator:
         while (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
             time.sleep(STATS_INTERVAL)
             with self.lock:
-                print(f"[统计] 当前总下载: {self.total_bytes} 字节")
+                print(f"[统计] 当前总下载: {self.total_bytes/1024/1024:.2f} MB")
 
         for t in threads:
             t.join(timeout=1)
 
 if __name__ == "__main__":
+    print("流量模拟器启动 - 使用标准Chrome驱动")
+    print(f"目标URL: {TARGET_URL}")
+    print(f"最大运行时间: {MAX_RUNTIME//3600}小时")
+    
     simulator = TrafficSimulator(TARGET_URL)
     simulator.run()
+    print("流量模拟结束")
