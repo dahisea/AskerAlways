@@ -28,7 +28,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install requests selenium
+        pip install selenium requests undetected-chromedriver
     
     - name: Build
       run: |
