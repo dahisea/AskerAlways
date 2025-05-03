@@ -22,8 +22,8 @@ HEADER_FIELDS = [
 ]
 
 MAX_THREADS = 10
-STATS_INTERVAL = 30
-MAX_RUNTIME = 60
+STATS_INTERVAL = 300
+MAX_RUNTIME = 600
 CHUNK_SIZE = 8192
 
 USER_AGENTS = [
@@ -178,8 +178,7 @@ class TrafficSimulator:
             t.join(timeout=1)
 
 if __name__ == "__main__":
-    print("流量模拟器启动 - 使用标准Chrome驱动")
-    print(f"目标URL: {TARGET_URL}")
+    print("测试")
     print(f"最大运行时间: {MAX_RUNTIME//3600}小时")
     
     simulator = TrafficSimulator(TARGET_URL)
