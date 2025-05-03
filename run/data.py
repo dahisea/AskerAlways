@@ -19,7 +19,6 @@ MAX_THREADS = 2000
 STATS_INTERVAL = 600
 MAX_RUNTIME = 4 * 3600
 CHUNK_SIZE = 8192
-TARGET_URL = "https://your-target-url.com"  # Set the target URL here
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
