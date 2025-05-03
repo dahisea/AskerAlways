@@ -5,12 +5,13 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from datetime import datetime, timedelta
-
+import socket
+import struct
 
 
 
 MAX_THREADS = 5
-MAX_RUNTIME = 60  # 最大运行时间（秒）
+MAX_RUNTIME = 61
 STATS_INTERVAL = 60
 
 USER_AGENTS = [
@@ -33,42 +34,100 @@ def random_user_agent():
         random.randint(80, 95),
     )
 
+def generate_random_headers():
+    ip = socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
+    headers = {
+        'User-Agent': random_user_agent(),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'DNT': str(random.randint(0, 1)),
+        'Upgrade-Insecure-Requests': '1',
+        'X-Real-IP': ip,
+        'X-Forwarded-For': ip,
+        'Remote-Addr': ip,
+        'X-Request-ID': ''.join(random.choices('0123456789abcdef', k=32)),
+        'X-Client-Version': str(random.randint(1, 10)) + '.' + str(random.randint(0, 9)),
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache'
+    }
+    return headers
+
 class BrowserWorker:
     def __init__(self, url):
         self.url = url
         self.bytes_downloaded = 0
         self.error_count = 0
+        self.cookies = {}
 
     def run(self):
+        try:
+            headers = generate_random_headers()
+            response = requests.get(self.url, headers=headers, cookies=self.cookies, stream=True, timeout=30)
+            
+            if 'html' in response.headers.get('Content-Type', ''):
+                # 如果内容类型是 HTML，使用 Selenium 模拟
+                self.handle_html_with_selenium(headers)
+            else:
+                # 否则使用 Requests 下载
+                self.handle_non_html_with_requests(response)
+
+        except Exception as e:
+            self.error_count += 1
+            print(f"[错误] {e}")
+
+    def handle_html_with_selenium(self, headers):
         try:
             options = Options()
             options.add_argument("--headless")
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
-            options.add_argument(f"user-agent={random_user_agent()}")
+            options.add_argument(f"user-agent={headers['User-Agent']}")
             options.page_load_strategy = 'eager'
 
             driver = webdriver.Chrome(options=options)
             driver.set_page_load_timeout(30)
             driver.get(self.url)
 
-            # 滚动页面
-            scroll_pause = 1.5
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            for _ in range(10):
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(scroll_pause)
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    break
-                last_height = new_height
+            # 获取重定向后的 URL
+            current_url = driver.current_url
+
+            # 如果重定向到非 HTML 文件（例如图片、视频等），使用 requests 继续下载
+            if 'html' not in driver.page_source:
+                self.handle_non_html_with_requests(requests.get(current_url, headers=headers, cookies=self.cookies))
+
+            else:
+                # 如果仍然是 HTML 页面，模拟滚动
+                self.scroll_page(driver)
 
             body = driver.page_source.encode("utf-8", errors="ignore")
             self.bytes_downloaded = len(body)
+            self.cookies = driver.get_cookies()
             driver.quit()
         except Exception as e:
             self.error_count += 1
             print(f"[错误] {e}")
+
+    def scroll_page(self, driver):
+        # 模拟滚动页面
+        scroll_pause = 1.5
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        for _ in range(10):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(scroll_pause)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+    def handle_non_html_with_requests(self, response):
+        try:
+            self.bytes_downloaded = len(response.content)
+            self.cookies = response.cookies
+        except Exception as e:
+            self.error_count += 1
+            print(f"[错误] 下载失败: {e}")
 
 class TrafficSimulator:
     def __init__(self):
