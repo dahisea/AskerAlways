@@ -1,17 +1,61 @@
 import threading
 import requests
 import time
-from queue import Queue
+import random
+import socket
+import struct
 from datetime import datetime, timedelta
 
 
 
 
+MAX_THREADS = 2000
+STATS_INTERVAL = 600
+MAX_RUNTIME = 4 * 3600
+CHUNK_SIZE = 8192
 
-MAX_THREADS = 2000                                    # 最大线程数
-STATS_INTERVAL = 600                                # 统计间隔(秒) 10分钟=600秒
-MAX_RUNTIME = 4 * 3600                             # 最大运行时间(秒) 4小时=14400秒
-CHUNK_SIZE = 8192                                  # 每次读取块大小
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{3}_{4}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{5}.0.{6} Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{7}.0) Gecko/20100101 Firefox/{8}.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS {9}_{10} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{11}.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android {12}; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{13}.0.{14}.{15} Mobile Safari/537.36"
+]
+
+def generate_random_ip():
+    """随机IP地址"""
+    return socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
+
+def generate_random_ua():
+    """随机User-Agent"""
+    template = random.choice(USER_AGENTS)
+    if "Chrome" in template:
+        return template.format(
+            random.randint(90, 99),  # Chrome主版本
+            random.randint(1000, 9999),  # 构建号
+            random.randint(100, 999))    # 修订号
+    elif "Safari" in template and "Mac" in template:
+        return template.format(
+            random.randint(11, 15),    # Mac OS X 10_版本
+            random.randint(0, 7),       # Mac OS X 修订号
+            random.randint(12, 15),     # Safari主版本
+            random.randint(0, 7))       # Safari修订号
+    elif "Firefox" in template:
+        return template.format(
+            random.randint(80, 95),    # Gecko版本
+            random.randint(80, 95))    # Firefox版本
+    elif "iPhone" in template:
+        return template.format(
+            random.randint(12, 15),     # iOS主版本
+            random.randint(0, 7),       # iOS修订号
+            random.randint(12, 15))    # Safari版本
+    elif "Android" in template:
+        return template.format(
+            random.randint(8, 11),      # Android版本
+            random.randint(90, 99),     # Chrome主版本
+            random.randint(1000, 9999), # 构建号
+            random.randint(100, 999))   # 修订号
 
 class TrafficGenerator:
     def __init__(self):
@@ -25,12 +69,31 @@ class TrafficGenerator:
         self.last_stats_time = self.start_time
         self.lock = threading.Lock()
         
-        # 初始化工作线程
         self.workers = []
         for _ in range(self.max_threads):
             t = threading.Thread(target=self.worker, daemon=True)
             t.start()
             self.workers.append(t)
+    
+    def get_random_headers(self):
+        """包含随机IP和动态UA的请求头"""
+        ip = generate_random_ip()
+        return {
+            'User-Agent': generate_random_ua(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'DNT': str(random.randint(0, 1)),
+            'Upgrade-Insecure-Requests': '1',
+            'X-Real-IP': ip,
+            'X-Forwarded-For': ip,
+            'Remote-Addr': ip,
+            'X-Request-ID': ''.join(random.choices('0123456789abcdef', k=32)),
+            'X-Client-Version': str(random.randint(1, 10)) + '.' + str(random.randint(0, 9)),
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache'
+        }
     
     def format_bytes(self, size):
         """将字节数转换为易读格式"""
@@ -51,7 +114,7 @@ class TrafficGenerator:
             remaining_time = max(0, MAX_RUNTIME - elapsed)
             download_speed = self.total_bytes / max(elapsed, 1)
             
-            print("\n=== 统计 ===")
+            print("\n=== 流量统计 ===")
             print(f"运行时间: {timedelta(seconds=int(elapsed))}")
             print(f"剩余时间: {timedelta(seconds=int(remaining_time))}")
             print(f"总流量: {self.format_bytes(self.total_bytes)}")
@@ -66,7 +129,13 @@ class TrafficGenerator:
         """工作线程，只下载数据不保存"""
         while not self.stop_flag:
             try:
-                with requests.get(self.url, stream=True, timeout=30) as r:
+                headers = self.get_random_headers()
+                with requests.get(
+                    self.url, 
+                    stream=True, 
+                    timeout=30,
+                    headers=headers
+                ) as r:
                     r.raise_for_status()
                     for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                         if self.stop_flag or not chunk:
@@ -79,7 +148,7 @@ class TrafficGenerator:
                     # 错误较多时自动减少线程数
                     if self.error_count % 5 == 0 and self.current_threads > 1:
                         self.current_threads -= 1
-                        print(f"[警告] 网络不稳定，减少至 {self.current_threads} 线程")
+                        print(f"[警告] 网络不稳定，减少至 {self.current_threads} 线程 | 错误: {str(e)}")
     
     def adjust_threads(self):
         """动态调整线程数"""
@@ -101,8 +170,8 @@ class TrafficGenerator:
             time.sleep(1)
     
     def run(self):
-        print(f"=== 流量生成器启动 ===")
-        print(f"目标URL: {self.url}")
+        print(f"=== 测试启动 ===")
+        print(f"依赖URL: {self.url}")
         print(f"最大线程数: {self.max_threads}")
         print(f"统计间隔: {STATS_INTERVAL//60}分钟")
         print(f"最大运行时间: {timedelta(seconds=MAX_RUNTIME)}")
@@ -130,7 +199,7 @@ class TrafficGenerator:
             
             # 显示最终统计
             self.show_stats(force=True)
-            print("测试流生成器已停止")
+            print("流量生成器已停止")
 
 if __name__ == "__main__":
     generator = TrafficGenerator()
