@@ -20,9 +20,9 @@ HEADER_FIELDS = [
     'X-Forwarded-For', 'Remote-Addr', 'X-Request-ID', 'X-Client-Version',
     'Pragma', 'Cache-Control'
 ]
-MAX_THREADS = 10
+MAX_THREADS = 100
 STATS_INTERVAL = 30
-MAX_RUNTIME = 60
+MAX_RUNTIME = 18000
 CHUNK_SIZE = 8192
 
 USER_AGENTS = [
@@ -153,12 +153,12 @@ class TrafficSimulator:
                 content_type, cookies, used_url = interact_with_page(self.url, headers)
                 if 'html' in content_type:
                     with self.lock:
-                        print(f"[模拟] HTML页面加载完成: {used_url}")
+                        print(f"[模拟] HTML页面加载完成")
                 else:
                     size, used_url = download_with_requests(self.url, cookies, headers)
                     with self.lock:
                         self.total_bytes += size
-                        print(f"[下载] 非HTML内容: {size} 字节 | URL: {used_url}")
+                        print(f"[下载] 非HTML内容: {size} 字节")
             except Exception as e:
                 print(f"[错误] {e}")
             time.sleep(random.uniform(1, 2))
