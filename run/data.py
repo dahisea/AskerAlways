@@ -15,8 +15,8 @@ from selenium.webdriver.common.action_chains import ActionChains
 
 
 MAX_THREADS = 2000
-STATS_INTERVAL = 600
-MAX_RUNTIME = 4 * 3600
+STATS_INTERVAL = 60
+MAX_RUNTIME = 61
 CHUNK_SIZE = 8192
 
 USER_AGENTS = [
