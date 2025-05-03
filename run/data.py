@@ -27,28 +27,56 @@ MAX_RUNTIME = 60
 CHUNK_SIZE = 8192
 
 USER_AGENTS = [
+    # Windows Chrome
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{3}_{4}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{5}.0.{6} Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{7}.0) Gecko/20100101 Firefox/{8}.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS {9}_{10} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{11}.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android {12}; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{13}.0.{14}.{15} Mobile Safari/537.36"
+    # Mac Safari
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{0}_{1}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{2}.0.{3} Safari/605.1.15",
+    # Windows Firefox
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{0}.0) Gecko/20100101 Firefox/{1}.0",
+    # iPhone Safari
+    "Mozilla/5.0 (iPhone; CPU iPhone OS {0}_{1} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{2}.0 Mobile/15E148 Safari/604.1",
+    # Android Chrome
+    "Mozilla/5.0 (Linux; Android {0}; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{1}.0.{2}.{3} Mobile Safari/537.36"
 ]
 
 def generate_random_ip():
     return socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
-
+    
 def generate_random_ua():
     template = random.choice(USER_AGENTS)
-    if "Chrome" in template:
-        return template.format(random.randint(90, 99), random.randint(1000, 9999), random.randint(100, 999))
-    elif "Safari" in template and "Mac" in template:
-        return template.format(random.randint(11, 15), random.randint(0, 7), random.randint(12, 15), random.randint(0, 7))
-    elif "Firefox" in template:
-        return template.format(random.randint(80, 95), random.randint(80, 95))
-    elif "iPhone" in template:
-        return template.format(random.randint(12, 15), random.randint(0, 7), random.randint(12, 15))
-    elif "Android" in template:
-        return template.format(random.randint(8, 11), random.randint(90, 99), random.randint(1000, 9999), random.randint(100, 999))
+    try:
+        if "Chrome" in template and "Windows" in template:
+            return template.format(
+                random.randint(90, 99),  # Chrome主版本
+                random.randint(1000, 9999),  # 构建号
+                random.randint(100, 999))    # 修订号
+        elif "Safari" in template and "Mac" in template:
+            return template.format(
+                random.randint(11, 15),    # Mac OS X 10_版本
+                random.randint(0, 7),       # Mac OS X 修订号
+                random.randint(12, 15),     # Safari主版本
+                random.randint(0, 7))       # Safari修订号
+        elif "Firefox" in template:
+            return template.format(
+                random.randint(80, 95),    # Gecko版本
+                random.randint(80, 95))    # Firefox版本
+        elif "iPhone" in template:
+            return template.format(
+                random.randint(12, 15),     # iOS主版本
+                random.randint(0, 7),       # iOS修订号
+                random.randint(12, 15))     # Safari版本
+        elif "Android" in template:
+            return template.format(
+                random.randint(8, 11),      # Android版本
+                random.randint(90, 99),     # Chrome主版本
+                random.randint(1000, 9999), # 构建号
+                random.randint(100, 999))   # 修订号
+        else:
+            # 默认返回一个简单的Chrome UA
+            return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(90, 99)}.0.{random.randint(1000, 9999)}.{random.randint(100, 999)} Safari/537.36"
+    except (IndexError, KeyError):
+        # 如果格式化失败，返回一个默认UA
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
 def generate_headers():
     ip = generate_random_ip()
