@@ -2,7 +2,7 @@ name: DataUpdate
 
 on:
   watch:
-    types: [startied]
+    types: [started]
   schedule:
     - cron: "45 * * * *"
    
