@@ -4,10 +4,10 @@ import random
 import socket
 import struct
 import requests
+import json
 from datetime import datetime, timedelta
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import WebDriverException
@@ -17,14 +17,13 @@ from urllib.parse import urlparse, urljoin
 
 
 
-MAX_THREADS = 20                   # More manageable thread count
-STATS_INTERVAL = 30                 # seconds
-MAX_RUNTIME = 80                 # 5 hours in seconds
-REQUEST_TIMEOUT = 10                # seconds for requests
-WEBDRIVER_TIMEOUT = 30              # seconds for selenium
-CHUNK_SIZE = 8192                   # 8KB
+MAX_THREADS = 20
+STATS_INTERVAL = 30
+MAX_RUNTIME = 80
+REQUEST_TIMEOUT = 10
+WEBDRIVER_TIMEOUT = 30
+CHUNK_SIZE = 8192
 
-# Header configuration
 HEADER_FIELDS = [
     'User-Agent', 'Accept', 'Accept-Language', 'Accept-Encoding',
     'Connection', 'DNT', 'Upgrade-Insecure-Requests', 'X-Real-IP',
@@ -32,17 +31,11 @@ HEADER_FIELDS = [
     'Pragma', 'Cache-Control'
 ]
 
-# User Agent Templates
 USER_AGENTS = [
-    # Windows Chrome
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.{2} Safari/537.36",
-    # Mac Safari
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{0}_{1}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{2}.0.{3} Safari/605.1.15",
-    # Windows Firefox
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{0}.0) Gecko/20100101 Firefox/{1}.0",
-    # iPhone Safari
     "Mozilla/5.0 (iPhone; CPU iPhone OS {0}_{1} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{2}.0 Mobile/15E148 Safari/604.1",
-    # Android Chrome
     "Mozilla/5.0 (Linux; Android {0}; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{1}.0.{2}.{3} Mobile Safari/537.36"
 ]
 
@@ -59,23 +52,19 @@ class TrafficSimulator:
         self.base_domain = urlparse(TARGET_URL).netloc
 
     def is_same_domain(self, url):
-        """Check if URL belongs to our target domain"""
         if not url:
             return False
         parsed = urlparse(url)
         return parsed.netloc == self.base_domain or not parsed.netloc
 
     def generate_random_url(self):
-        """Generate a random URL within the target domain"""
         random_path = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=16))
         return urljoin(TARGET_URL.rstrip('/') + '/', random_path)
 
     def generate_random_ip(self):
-        """Generate a random IPv4 address"""
         return socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
 
     def generate_random_ua(self):
-        """Generate a random user agent from templates"""
         template = random.choice(USER_AGENTS)
         try:
             if "Chrome" in template and "Windows" in template:
@@ -105,12 +94,9 @@ class TrafficSimulator:
                     random.randint(1000, 9999),
                     random.randint(100, 999))
         except (IndexError, KeyError):
-            pass
-        # Fallback to a common Chrome UA
-        return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(90, 99)}.0.{random.randint(1000, 9999)}.{random.randint(100, 999)} Safari/537.36"
+            return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(90, 99)}.0.{random.randint(1000, 9999)}.{random.randint(100, 999)} Safari/537.36"
 
     def generate_headers(self):
-        """Generate random headers for requests"""
         ip = self.generate_random_ip()
         headers = {
             'User-Agent': self.generate_random_ua(),
@@ -131,7 +117,6 @@ class TrafficSimulator:
         return {k: headers[k] for k in HEADER_FIELDS if k in headers}
 
     def handle_redirects(self, response, session):
-        """Follow redirects while staying on target domain"""
         if response.is_redirect and response.next:
             next_url = response.next.url
             if self.is_same_domain(next_url):
@@ -142,14 +127,13 @@ class TrafficSimulator:
         return response
 
     def interact_with_page(self, headers):
-        """Interact with a page using Selenium with proper redirect handling"""
         options = Options()
         options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
+        options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
         
-        # Set headers for Chrome
         for header, value in headers.items():
             options.add_argument(f'--header={header}: {value}')
 
@@ -161,7 +145,19 @@ class TrafficSimulator:
             random_url = self.generate_random_url()
             driver.get(random_url)
             
-            # Check if we were redirected
+            html_size = 0
+            logs = driver.get_log('performance')
+            for entry in logs:
+                try:
+                    message = json.loads(entry['message'])['message']
+                    if message['method'] == 'Network.responseReceived':
+                        url = message['params']['response']['url']
+                        if self.is_same_domain(url):
+                            size = message['params']['response'].get('encodedDataLength', 0)
+                            html_size += size
+                except (KeyError, ValueError):
+                    continue
+
             current_url = driver.current_url
             if current_url != random_url:
                 if not self.is_same_domain(current_url):
@@ -170,15 +166,15 @@ class TrafficSimulator:
                     self.redirect_count += 1
                     print(f"[Redirect] Browser followed to: {current_url}")
 
-            # Simulate user interaction
             actions = ActionChains(driver)
             actions.send_keys(Keys.PAGE_DOWN).perform()
-            time.sleep(random.uniform(0.5, 1.5))  # Random delay between actions
+            time.sleep(random.uniform(0.5, 1.5))
 
-            # Get page information
             content_type = driver.execute_script("return document.contentType")
             cookies = driver.get_cookies()
-            return content_type, cookies, driver.current_url
+            html_size += len(driver.page_source.encode('utf-8'))
+            
+            return content_type, cookies, driver.current_url, html_size
         except WebDriverException as e:
             raise Exception(f"Selenium error: {str(e)}")
         finally:
@@ -189,24 +185,17 @@ class TrafficSimulator:
                     pass
 
     def download_with_requests(self, cookies, headers):
-        """Download content using requests with redirect handling"""
         random_url = self.generate_random_url()
         try:
             with requests.Session() as s:
-                # Set cookies if any
                 for c in cookies:
                     s.cookies.set(c['name'], c['value'])
                 
-                # Make initial request
                 r = s.get(random_url, headers=headers, stream=True, timeout=REQUEST_TIMEOUT, allow_redirects=False)
-                
-                # Handle redirects manually to stay on target domain
                 r = self.handle_redirects(r, s)
-                
                 r.raise_for_status()
                 final_url = r.url
                 
-                # Verify we're still on target domain
                 if not self.is_same_domain(final_url):
                     raise Exception(f"Attempted to leave target domain to: {final_url}")
 
@@ -220,39 +209,35 @@ class TrafficSimulator:
             raise Exception(f"Request error: {str(e)}")
 
     def simulate_session(self):
-        """Simulate a complete user session with proper domain handling"""
         while self.running and (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
             try:
                 with self.lock:
                     self.request_count += 1
 
                 headers = self.generate_headers()
-                content_type, cookies, used_url = self.interact_with_page(headers)
+                content_type, cookies, used_url, html_size = self.interact_with_page(headers)
                 
                 if not self.is_same_domain(used_url):
                     raise Exception(f"Navigated away from target domain to: {used_url}")
+
+                with self.lock:
+                    self.total_bytes += html_size
+                    self.success_count += 1
+                    print(f"[Page Load] {html_size} bytes from {used_url} (HTML)")
 
                 if 'html' not in content_type.lower():
                     size, used_url = self.download_with_requests(cookies, headers)
                     with self.lock:
                         self.total_bytes += size
-                        self.success_count += 1
                         print(f"[Download] {size} bytes from {used_url}")
-                else:
-                    with self.lock:
-                        self.success_count += 1
-                        print(f"[Page Load] HTML content from {used_url}")
-
             except Exception as e:
                 with self.lock:
                     self.error_count += 1
                     print(f"[Error] {str(e)}")
             
-            # Random delay between sessions
             time.sleep(random.uniform(1, 3))
 
     def print_stats(self):
-        """Print current statistics"""
         elapsed = (datetime.now() - self.start_time).total_seconds()
         mb_transferred = self.total_bytes / (1024 * 1024)
         req_rate = self.request_count / elapsed if elapsed > 0 else 0
@@ -269,20 +254,18 @@ class TrafficSimulator:
         print("=================\n")
 
     def run(self):
-        """Run the traffic simulation"""
+        print(f"Starting traffic simulation for {TARGET_URL}")
         print(f"Domain restriction: {self.base_domain}")
         print(f"Maximum runtime: {timedelta(seconds=MAX_RUNTIME)}")
         print(f"Maximum threads: {MAX_THREADS}")
         
-        # Start worker threads
         threads = []
-        for _ in range(min(MAX_THREADS, 20)):  # Limit to 20 threads by default
+        for _ in range(min(MAX_THREADS, 20)):
             t = threading.Thread(target=self.simulate_session)
             t.daemon = True
             t.start()
             threads.append(t)
 
-        # Main loop for statistics
         try:
             while (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
                 time.sleep(STATS_INTERVAL)
