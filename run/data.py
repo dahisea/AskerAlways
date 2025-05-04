@@ -58,7 +58,7 @@ class TrafficSimulator:
         return parsed.netloc == self.base_domain or not parsed.netloc
 
     def generate_random_url(self):
-        random_path = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=16))
+        random_path = ''.join(random.choices('0123456789', k=16))
         return urljoin(TARGET_URL.rstrip('/') + '/', random_path)
 
     def generate_random_ip(self):
@@ -122,7 +122,7 @@ class TrafficSimulator:
             if self.is_same_domain(next_url):
                 with self.lock:
                     self.redirect_count += 1
-                    print(f"[Redirect] Following to: {next_url}")
+                    print(f"[Redirect] Following")
                 return session.get(next_url, timeout=REQUEST_TIMEOUT)
         return response
 
@@ -161,10 +161,10 @@ class TrafficSimulator:
             current_url = driver.current_url
             if current_url != random_url:
                 if not self.is_same_domain(current_url):
-                    raise Exception(f"Redirected to external domain: {current_url}")
+                    raise Exception(f"Redirected to external domain")
                 with self.lock:
                     self.redirect_count += 1
-                    print(f"[Redirect] Browser followed to: {current_url}")
+                    print(f"[Redirect] Browser followed")
 
             actions = ActionChains(driver)
             actions.send_keys(Keys.PAGE_DOWN).perform()
@@ -197,7 +197,7 @@ class TrafficSimulator:
                 final_url = r.url
                 
                 if not self.is_same_domain(final_url):
-                    raise Exception(f"Attempted to leave target domain to: {final_url}")
+                    raise Exception(f"Attempted to leave target domain")
 
                 total = 0
                 for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
@@ -218,18 +218,18 @@ class TrafficSimulator:
                 content_type, cookies, used_url, html_size = self.interact_with_page(headers)
                 
                 if not self.is_same_domain(used_url):
-                    raise Exception(f"Navigated away from target domain to: {used_url}")
+                    raise Exception(f"Navigated away from target domain")
 
                 with self.lock:
                     self.total_bytes += html_size
                     self.success_count += 1
-                    print(f"[Page Load] {html_size} bytes from {used_url} (HTML)")
+                    print(f"[Page Load] {html_size} bytes from (HTML)")
 
                 if 'html' not in content_type.lower():
                     size, used_url = self.download_with_requests(cookies, headers)
                     with self.lock:
                         self.total_bytes += size
-                        print(f"[Download] {size} bytes from {used_url}")
+                        print(f"[Download] {size} bytes")
             except Exception as e:
                 with self.lock:
                     self.error_count += 1
@@ -254,7 +254,6 @@ class TrafficSimulator:
         print("=================\n")
 
     def run(self):
-        print(f"Starting traffic simulation for {TARGET_URL}")
         print(f"Domain restriction: {self.base_domain}")
         print(f"Maximum runtime: {timedelta(seconds=MAX_RUNTIME)}")
         print(f"Maximum threads: {MAX_THREADS}")
