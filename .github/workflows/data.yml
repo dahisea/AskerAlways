@@ -2,7 +2,7 @@ name: DataUpdate
 
 on:
   watch:
-    types: [startied]
+    types: [started]
   schedule:
     - cron: "45 * * * *"
    
@@ -40,6 +40,6 @@ jobs:
       run: |
         cp ${{ github.workspace }}/run/data.py ${{ github.workspace }}/updater.py
         echo "${{ secrets.DTAPI }}" > api.txt
-        sed -i '15 r api.txt' ${{ github.workspace }}/updater.py
+        sed -i '18 r api.txt' ${{ github.workspace }}/updater.py
         python ${{ github.workspace }}/updater.py
     
