@@ -19,7 +19,7 @@ from urllib.parse import urlparse, urljoin
 
 MAX_THREADS = 20
 STATS_INTERVAL = 30
-MAX_RUNTIME = 80
+MAX_RUNTIME = 18000
 REQUEST_TIMEOUT = 10
 WEBDRIVER_TIMEOUT = 30
 CHUNK_SIZE = 8192
@@ -254,7 +254,6 @@ class TrafficSimulator:
         print("=================\n")
 
     def run(self):
-        print(f"Domain restriction: {self.base_domain}")
         print(f"Maximum runtime: {timedelta(seconds=MAX_RUNTIME)}")
         print(f"Maximum threads: {MAX_THREADS}")
         
