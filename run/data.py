@@ -49,17 +49,31 @@ class TrafficSimulator:
         self.start_time = datetime.now()
         self.lock = threading.Lock()
         self.running = True
-        self.base_domain = urlparse(TARGET_URL).netloc
+        self.domains = {urlparse(url).netloc for url in TARGET_URLS}
+        
+        # Per-domain statistics
+        self.domain_stats = {domain: {
+            'requests': 0,
+            'success': 0,
+            'errors': 0,
+            'bytes': 0
+        } for domain in self.domains}
 
-    def is_same_domain(self, url):
+    def get_random_target(self):
+        """Select a random target URL from the list"""
+        return random.choice(TARGET_URLS)
+
+    def is_same_domain(self, url, current_domain):
+        """Check if URL belongs to one of our target domains"""
         if not url:
             return False
         parsed = urlparse(url)
-        return parsed.netloc == self.base_domain or not parsed.netloc
+        return parsed.netloc in self.domains or not parsed.netloc
 
-    def generate_random_url(self):
+    def generate_random_url(self, base_url):
+        """Generate a random URL based on the selected target"""
         random_path = ''.join(random.choices('0123456789', k=6))
-        return urljoin(TARGET_URL.rstrip('/') + '/', random_path)
+        return urljoin(base_url.rstrip('/') + '/', random_path)
 
     def generate_random_ip(self):
         return socket.inet_ntoa(struct.pack('>I', random.randint(1, 0xffffffff)))
@@ -116,17 +130,17 @@ class TrafficSimulator:
         }
         return {k: headers[k] for k in HEADER_FIELDS if k in headers}
 
-    def handle_redirects(self, response, session):
+    def handle_redirects(self, response, session, current_domain):
         if response.is_redirect and response.next:
             next_url = response.next.url
-            if self.is_same_domain(next_url):
+            if self.is_same_domain(next_url, current_domain):
                 with self.lock:
                     self.redirect_count += 1
                     print(f"[Redirect] Following")
                 return session.get(next_url, timeout=REQUEST_TIMEOUT)
         return response
 
-    def interact_with_page(self, headers):
+    def interact_with_page(self, headers, target_url):
         options = Options()
         options.add_argument('--headless')
         options.add_argument('--disable-gpu')
@@ -138,11 +152,12 @@ class TrafficSimulator:
             options.add_argument(f'--header={header}: {value}')
 
         driver = None
+        current_domain = urlparse(target_url).netloc
         try:
             driver = Chrome(options=options)
             driver.set_page_load_timeout(WEBDRIVER_TIMEOUT)
             
-            random_url = self.generate_random_url()
+            random_url = self.generate_random_url(target_url)
             driver.get(random_url)
             
             html_size = 0
@@ -152,7 +167,7 @@ class TrafficSimulator:
                     message = json.loads(entry['message'])['message']
                     if message['method'] == 'Network.responseReceived':
                         url = message['params']['response']['url']
-                        if self.is_same_domain(url):
+                        if self.is_same_domain(url, current_domain):
                             size = message['params']['response'].get('encodedDataLength', 0)
                             html_size += size
                 except (KeyError, ValueError):
@@ -160,7 +175,7 @@ class TrafficSimulator:
 
             current_url = driver.current_url
             if current_url != random_url:
-                if not self.is_same_domain(current_url):
+                if not self.is_same_domain(current_url, current_domain):
                     raise Exception(f"Redirected to external domain")
                 with self.lock:
                     self.redirect_count += 1
@@ -174,7 +189,7 @@ class TrafficSimulator:
             cookies = driver.get_cookies()
             html_size += len(driver.page_source.encode('utf-8'))
             
-            return content_type, cookies, driver.current_url, html_size
+            return content_type, cookies, driver.current_url, html_size, current_domain
         except WebDriverException as e:
             raise Exception(f"Selenium error: {str(e)}")
         finally:
@@ -184,19 +199,19 @@ class TrafficSimulator:
                 except:
                     pass
 
-    def download_with_requests(self, cookies, headers):
-        random_url = self.generate_random_url()
+    def download_with_requests(self, cookies, headers, target_url, current_domain):
+        random_url = self.generate_random_url(target_url)
         try:
             with requests.Session() as s:
                 for c in cookies:
                     s.cookies.set(c['name'], c['value'])
                 
                 r = s.get(random_url, headers=headers, stream=True, timeout=REQUEST_TIMEOUT, allow_redirects=False)
-                r = self.handle_redirects(r, s)
+                r = self.handle_redirects(r, s, current_domain)
                 r.raise_for_status()
                 final_url = r.url
                 
-                if not self.is_same_domain(final_url):
+                if not self.is_same_domain(final_url, current_domain):
                     raise Exception(f"Attempted to leave target domain")
 
                 total = 0
@@ -208,31 +223,50 @@ class TrafficSimulator:
         except RequestException as e:
             raise Exception(f"Request error: {str(e)}")
 
+    def update_domain_stats(self, domain, success=False, bytes_transferred=0):
+        """Update statistics for a specific domain"""
+        with self.lock:
+            self.domain_stats[domain]['requests'] += 1
+            if success:
+                self.domain_stats[domain]['success'] += 1
+                self.domain_stats[domain]['bytes'] += bytes_transferred
+            else:
+                self.domain_stats[domain]['errors'] += 1
+
     def simulate_session(self):
         while self.running and (datetime.now() - self.start_time).total_seconds() < MAX_RUNTIME:
             try:
+                target_url = self.get_random_target()
+                current_domain = urlparse(target_url).netloc
+                
                 with self.lock:
                     self.request_count += 1
+                    self.domain_stats[current_domain]['requests'] += 1
 
                 headers = self.generate_headers()
-                content_type, cookies, used_url, html_size = self.interact_with_page(headers)
+                content_type, cookies, used_url, html_size, domain = self.interact_with_page(headers, target_url)
                 
-                if not self.is_same_domain(used_url):
+                if not self.is_same_domain(used_url, domain):
                     raise Exception(f"Navigated away from target domain")
 
                 with self.lock:
                     self.total_bytes += html_size
                     self.success_count += 1
+                    self.domain_stats[domain]['success'] += 1
+                    self.domain_stats[domain]['bytes'] += html_size
                     print(f"[Page Load] {html_size} bytes from (HTML)")
 
                 if 'html' not in content_type.lower():
-                    size, used_url = self.download_with_requests(cookies, headers)
+                    size, used_url = self.download_with_requests(cookies, headers, target_url, domain)
                     with self.lock:
                         self.total_bytes += size
+                        self.domain_stats[domain]['bytes'] += size
                         print(f"[Download] {size} bytes")
             except Exception as e:
                 with self.lock:
                     self.error_count += 1
+                    if 'domain' in locals():
+                        self.domain_stats[domain]['errors'] += 1
                     print(f"[Error] {str(e)}")
             
             time.sleep(random.uniform(1, 3))
@@ -243,7 +277,7 @@ class TrafficSimulator:
         req_rate = self.request_count / elapsed if elapsed > 0 else 0
         success_rate = (self.success_count / self.request_count * 100) if self.request_count > 0 else 0
         
-        print("\n=== Statistics ===")
+        print("\n=== Global Statistics ===")
         print(f"Running for: {timedelta(seconds=int(elapsed))}")
         print(f"Total requests: {self.request_count}")
         print(f"Successful: {self.success_count} ({success_rate:.1f}%)")
@@ -251,7 +285,19 @@ class TrafficSimulator:
         print(f"Redirects: {self.redirect_count}")
         print(f"Data transferred: {mb_transferred:.2f} MB")
         print(f"Request rate: {req_rate:.2f} req/sec")
-        print("=================\n")
+        
+        print("\n=== Per-Domain Statistics ===")
+        for domain, stats in self.domain_stats.items():
+            domain_req_rate = stats['requests'] / elapsed if elapsed > 0 else 0
+            domain_success_rate = (stats['success'] / stats['requests'] * 100) if stats['requests'] > 0 else 0
+            domain_mb = stats['bytes'] / (1024 * 1024)
+            
+            print(f"  Requests: {stats['requests']} ({domain_req_rate:.2f} req/sec)")
+            print(f"  Successful: {stats['success']} ({domain_success_rate:.1f}%)")
+            print(f"  Errors: {stats['errors']}")
+            print(f"  Data transferred: {domain_mb:.2f} MB")
+        
+        print("\n=================\n")
 
     def run(self):
         print(f"Maximum runtime: {timedelta(seconds=MAX_RUNTIME)}")
