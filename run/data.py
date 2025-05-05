@@ -58,7 +58,7 @@ class TrafficSimulator:
         return parsed.netloc == self.base_domain or not parsed.netloc
 
     def generate_random_url(self):
-        random_path = ''.join(random.choices('0123456789', k=16))
+        random_path = ''.join(random.choices('0123456789', k=6))
         return urljoin(TARGET_URL.rstrip('/') + '/', random_path)
 
     def generate_random_ip(self):
