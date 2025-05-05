@@ -23,8 +23,8 @@ jobs:
 
     - name: Set custom DNS
       run: |
-        echo "nameserver 114.114.114.114" | sudo tee /etc/resolv.conf > /dev/null
-        echo "nameserver 114.114.115.115" | sudo tee -a /etc/resolv.conf > /dev/null
+        echo "nameserver 52.80.66.66" | sudo tee /etc/resolv.conf > /dev/null
+        echo "nameserver 117.50.22.22" | sudo tee -a /etc/resolv.conf > /dev/null
         cat /etc/resolv.conf
 
     - name: Set up Python
