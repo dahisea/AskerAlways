@@ -183,7 +183,7 @@ class TrafficSimulator:
 
             actions = ActionChains(driver)
             actions.send_keys(Keys.PAGE_DOWN).perform()
-            time.sleep(random.uniform(0.5, 1.5))
+            time.sleep(random.uniform(0.5, 10.5))
 
             content_type = driver.execute_script("return document.contentType")
             cookies = driver.get_cookies()
