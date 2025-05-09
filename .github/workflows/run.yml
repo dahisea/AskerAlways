@@ -2,9 +2,7 @@ name: Update
 
 on:
   watch:
-    types: [starteid]
-  schedule:
-    - cron: "45 * * * *"
+    types: [started]
    
 jobs:
   build:
