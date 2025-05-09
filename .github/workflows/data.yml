@@ -21,6 +21,14 @@ jobs:
         auth_client_id: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_ID }}
         auth_client_secret: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_SECRET }}
 
+    - name: Add custom hosts from secret
+        run: |
+          echo "${{ secrets.CUSTOM_HOSTS }}" | sudo tee -a /etc/hosts
+          
+    - name: Verify hosts
+        run: |
+          cat /etc/hosts
+
     - name: Set custom DNS
       run: |
         echo "nameserver 52.80.66.66" | sudo tee /etc/resolv.conf > /dev/null
