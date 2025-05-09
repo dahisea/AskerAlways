@@ -22,12 +22,12 @@ jobs:
         auth_client_secret: ${{ secrets.CLOUDFLARE_AUTH_CLIENT_SECRET }}
 
     - name: Add custom hosts from secret
-        run: |
-          echo "${{ secrets.CUSTOM_HOSTS }}" | sudo tee -a /etc/hosts
+      run: |
+        echo "${{ secrets.CUSTOM_HOSTS }}" | sudo tee -a /etc/hosts
           
     - name: Verify hosts
-        run: |
-          cat /etc/hosts
+      run: |
+        cat /etc/hosts
 
     - name: Set custom DNS
       run: |
